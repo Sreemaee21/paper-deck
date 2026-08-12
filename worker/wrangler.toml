@@ -1,0 +1,17 @@
+# Paper Deck backend — deploy with: npx wrangler deploy
+name = "paper-deck-api"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+# Your Notion database id (32 hex chars from the database URL).
+DATABASE_ID = "39f152ca13008004a3a1f3b5203805fa"
+
+# Public base URL of the R2 bucket (r2.dev development URL or a custom domain).
+PUBLIC_R2_URL = "https://pub-259370e2d1644b6f8cf44cab9be781f8.r2.dev/"
+
+# Secret (never in this file) — set with: npx wrangler secret put NOTION_TOKEN
+
+[[r2_buckets]]
+binding = "PDFS"
+bucket_name = "paper-deck-pdfs"
