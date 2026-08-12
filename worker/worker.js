@@ -16,6 +16,7 @@
  *   GET    /papers        — all rows, mapped to the paper schema
  *   POST   /papers        — create row (server-side arXiv enrichment)
  *   PATCH  /papers/:id    — update fields on a row
+ *   DELETE /papers/:id    — remove a row (archives the Notion page)
  *   POST   /upload        — multipart PDF upload -> R2 -> { pdf_url }
  *   GET    /file/:key     — serve a PDF from R2 (CORS-safe fallback)
  *   GET    /fetchpdf?url= — proxy an arxiv.org PDF with CORS (for the reader)
@@ -26,7 +27,7 @@ const NOTION_VERSION = '2022-06-28';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
   'Access-Control-Max-Age': '86400',
 };
@@ -59,6 +60,9 @@ export default {
       const patch = path.match(/^\/papers\/([\w-]+)$/);
       if (patch && request.method === 'PATCH') {
         return await updatePaper(env, patch[1], await request.json());
+      }
+      if (patch && request.method === 'DELETE') {
+        return await deletePaper(env, patch[1]);
       }
       if (path === '/upload' && request.method === 'POST') {
         return await uploadPdf(request, env, url.origin);
@@ -283,6 +287,17 @@ async function updatePaper(env, id, rec) {
     body: JSON.stringify({ properties: paperToProperties(rec) }),
   });
   return json({ paper: pageToPaper(page) });
+}
+
+// Notion has no hard delete via the API; archiving removes the page from the
+// database (it lands in Notion's trash and can be restored there). That is the
+// right semantics for a "remove from library" action.
+async function deletePaper(env, id) {
+  await notion(env, `/pages/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ archived: true }),
+  });
+  return json({ ok: true, id });
 }
 
 /* ----------------------------------------------------- arXiv enrichment */

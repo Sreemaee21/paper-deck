@@ -207,9 +207,55 @@ const TagChips = ({ tags }) => html`
     )}
   </span>`;
 
+const MANUAL_TEXT_FIELDS = ['notes', 'remarks', 'gaps', 'key_contribution', 'relevance'];
+
+// "Has content a user filled in", used to decide whether removing a paper needs
+// the double confirm. Bibliographic fields (title/authors/venue/year/arxiv) are
+// auto-imported, so they don't count; notes, rating, tags and any custom column do.
+function hasManualContent(p) {
+  if (MANUAL_TEXT_FIELDS.some((f) => (p[f] || '').trim())) return true;
+  if (p.rating) return true;
+  if ((p.tags || []).length) return true;
+  for (const f of Object.values(p.extra || {})) {
+    const v = f && f.value;
+    if (Array.isArray(v) ? v.length : v !== '' && v != null && v !== false) return true;
+  }
+  return false;
+}
+
+// Chip editor for a multi-value category: built-in Tags and any Notion
+// multi_select column. Known options render as toggle chips, plus a free-text
+// add — same UX as the Add view's tag picker, so categories are chosen, not typed.
+function TagPicker({ value, options, onChange }) {
+  const [nt, setNt] = useState('');
+  const sel = value || [];
+  const all = useMemo(() => [...new Set([...(options || []), ...sel])], [options, sel]);
+  const toggle = (t) =>
+    onChange(sel.includes(t) ? sel.filter((x) => x !== t) : [...sel, t]);
+  const add = () => {
+    const t = nt.trim();
+    if (t && !sel.includes(t)) onChange([...sel, t]);
+    setNt('');
+  };
+  return html`
+    <div class="tagpick">
+      <div class="chip-row" style=${{ margin: 0 }}>
+        ${all.length === 0 ? html`<span class="hint">No options yet — add one.</span>` : ''}
+        ${all.map((t) => html`
+          <button key=${t} type="button" class="chip ${sel.includes(t) ? 'on' : ''}"
+            onClick=${() => toggle(t)}>${t}</button>`)}
+      </div>
+      <div class="inline-add">
+        <input placeholder="New…" value=${nt} onChange=${(e) => setNt(e.target.value)}
+          onKeyDown=${(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
+        <button type="button" class="btn ghost" onClick=${add}>Add</button>
+      </div>
+    </div>`;
+}
+
 /* ---------------------------------------------------------------- Library */
 
-function Library({ papers, loading, onOpen, onRefresh }) {
+function Library({ papers, loading, onOpen, onRefresh, onDelete }) {
   const [q, setQ] = useState('');
   const [tagFilter, setTagFilter] = useState(null);
   const [statusFilter, setStatusFilter] = useState(null);
@@ -239,6 +285,18 @@ function Library({ papers, loading, onOpen, onRefresh }) {
     else list = [...list].sort((a, b) => (b.date_added || '').localeCompare(a.date_added || ''));
     return list;
   }, [papers, q, tagFilter, statusFilter, sort]);
+
+  // Single click removes an empty paper straight away; if the paper has notes,
+  // tags, a rating or any custom field filled in, confirm twice before removing.
+  const askDelete = (e, p) => {
+    e.stopPropagation();
+    const title = p.title || 'Untitled';
+    if (hasManualContent(p)) {
+      if (!window.confirm(`"${title}" has notes/tags/fields you filled in.\n\nRemove it anyway? (1 of 2)`)) return;
+      if (!window.confirm(`Really remove "${title}"?\nThis archives it in Notion and can't be undone from the app. (2 of 2)`)) return;
+    }
+    onDelete(p);
+  };
 
   return html`
     <div class="page">
@@ -271,7 +329,10 @@ function Library({ papers, loading, onOpen, onRefresh }) {
           </div>`
         : html`<div class="grid">
             ${shown.map((p) => html`
-              <button key=${p.id} class="card" onClick=${() => onOpen(p)}>
+              <div key=${p.id} class="card" role="button" tabindex="0"
+                onClick=${() => onOpen(p)}
+                onKeyDown=${(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(p); } }}>
+                <button class="card-del" title="Remove paper" onClick=${(e) => askDelete(e, p)}>✕</button>
                 <h3>${p.title || 'Untitled'}</h3>
                 <div class="meta">
                   ${[p.venue, p.year].filter(Boolean).join(' · ') || ' '}
@@ -283,7 +344,7 @@ function Library({ papers, loading, onOpen, onRefresh }) {
                   </span>
                   <${Stars} n=${p.rating} />
                 </div>
-              </button>`)}
+              </div>`)}
           </div>`}
     </div>`;
 }
@@ -569,7 +630,7 @@ function PdfPane({ paper, onNeedPdf, showToast }) {
  * is enough to make it show up here — no code change needed. `field` is
  * `{type, value}` as returned by the Worker.
  */
-function ExtraField({ name, field, open, onToggle, onChange }) {
+function ExtraField({ name, field, options, open, onToggle, onChange }) {
   const { type, value } = field;
   if (type === 'rich_text') {
     return html`
@@ -591,10 +652,21 @@ function ExtraField({ name, field, open, onToggle, onChange }) {
   }
   if (type === 'multi_select') {
     return html`
+      <div class="field">
+        <label>${name}</label>
+        <${TagPicker} value=${value} options=${options} onChange=${onChange} />
+      </div>`;
+  }
+  if (type === 'select') {
+    const listId = `dl-${name.replace(/\W+/g, '-')}`;
+    return html`
       <div class="field-row">
         <label>${name}</label>
-        <input value=${(value || []).join(', ')} placeholder="Comma-separated"
-          onChange=${(e) => onChange(e.target.value.split(',').map((s) => s.trim()).filter(Boolean))} />
+        <input list=${listId} value=${value || ''} placeholder="Choose or type…"
+          onChange=${(e) => onChange(e.target.value)} />
+        <datalist id=${listId}>
+          ${(options || []).map((o) => html`<option key=${o} value=${o}></option>`)}
+        </datalist>
       </div>`;
   }
   return html`
@@ -607,7 +679,7 @@ function ExtraField({ name, field, open, onToggle, onChange }) {
 
 /* ---------------------------------------------------------------- Reader */
 
-function Reader({ paper, onPatch, showToast }) {
+function Reader({ paper, onPatch, showToast, allTags, extraOptions }) {
   const [local, setLocal] = useState(paper);
   const [open, setOpen] = useState({ notes: true });
   const [notesVisible, setNotesVisible] = useState(true);
@@ -665,11 +737,32 @@ function Reader({ paper, onPatch, showToast }) {
         onNeedPdf=${importPdf} showToast=${showToast} />
       ${notesVisible && html`
         <div class="notes-pane">
-          <h2>${local.title || 'Untitled'}</h2>
-          <div class="paper-meta">
-            ${[local.authors, local.venue, local.year].filter(Boolean).join(' · ')}
+          <div class="field">
+            <label>Title</label>
+            <input value=${local.title || ''} placeholder="Paper title"
+              onChange=${(e) => edit('title', e.target.value)} />
           </div>
-          <${TagChips} tags=${local.tags} />
+          <div class="field">
+            <label>Authors</label>
+            <input value=${local.authors || ''} placeholder="A. Author, B. Author"
+              onChange=${(e) => edit('authors', e.target.value)} />
+          </div>
+          <div class="row">
+            <div class="field">
+              <label>Venue</label>
+              <input value=${local.venue || ''} placeholder="ICSE, NeurIPS…"
+                onChange=${(e) => edit('venue', e.target.value)} />
+            </div>
+            <div class="field">
+              <label>Year</label>
+              <input type="number" value=${local.year ?? ''} placeholder="2026"
+                onChange=${(e) => edit('year', e.target.value === '' ? null : Number(e.target.value))} />
+            </div>
+          </div>
+          <div class="field">
+            <label>Tags</label>
+            <${TagPicker} value=${local.tags} options=${allTags} onChange=${(v) => edit('tags', v)} />
+          </div>
           <div class="field-row">
             <label>Status</label>
             <select value=${local.status} onChange=${(e) => edit('status', e.target.value)}>
@@ -691,13 +784,17 @@ function Reader({ paper, onPatch, showToast }) {
             </div>`)}
           ${Object.entries(local.extra || {}).map(([name, f]) => html`
             <${ExtraField} key=${name} name=${name} field=${f}
+              options=${(extraOptions || {})[name] || []}
               open=${!!open[name]}
               onToggle=${() => setOpen((o) => ({ ...o, [name]: !o[name] }))}
               onChange=${(v) => editExtra(name, f.type, v)} />`)}
+          <div class="field">
+            <label>arXiv link</label>
+            <input value=${local.arxiv_link || ''} placeholder="https://arxiv.org/abs/…"
+              onChange=${(e) => edit('arxiv_link', e.target.value)} />
+          </div>
           ${local.arxiv_link && html`
-            <a class="hint" href=${local.arxiv_link} target="_blank" rel="noopener">
-              ${local.arxiv_link}
-            </a>`}
+            <a class="hint" href=${local.arxiv_link} target="_blank" rel="noopener">↗ open link</a>`}
           <div class="save-state">${saveState}</div>
         </div>`}
       <button class="iconbtn" title=${notesVisible ? 'Full-width PDF' : 'Show notes'}
@@ -1078,6 +1175,40 @@ function App() {
     });
   }, []);
 
+  const allTags = useMemo(() => {
+    const s = new Set(STARTER_TAGS);
+    papers.forEach((p) => (p.tags || []).forEach((t) => s.add(t)));
+    return [...s];
+  }, [papers]);
+
+  // Known option lists for custom select / multi_select columns, gathered
+  // across all papers, so those fields render as pickers instead of free text.
+  const extraOptions = useMemo(() => {
+    const acc = {};
+    for (const p of papers) {
+      for (const [name, f] of Object.entries(p.extra || {})) {
+        if (f.type !== 'select' && f.type !== 'multi_select') continue;
+        const set = (acc[name] ||= new Set());
+        if (f.type === 'select' && f.value) set.add(f.value);
+        if (f.type === 'multi_select') (f.value || []).forEach((v) => set.add(v));
+      }
+    }
+    const out = {};
+    for (const k of Object.keys(acc)) out[k] = [...acc[k]];
+    return out;
+  }, [papers]);
+
+  const removePaper = useCallback(async (p) => {
+    try {
+      await api(`/papers/${p.id}`, { method: 'DELETE' });
+      setPapers((l) => l.filter((x) => x.id !== p.id));
+      setCurrent((c) => (c && c.id === p.id ? null : c));
+      showToast('Removed ✓');
+    } catch (e) {
+      showToast(`Could not remove: ${e.message}`);
+    }
+  }, [showToast]);
+
   const openPaper = (p) => { setCurrent(p); setRoute('reader'); };
   const applyPatch = useCallback((id, fields) => {
     setPapers((list) => list.map((p) => {
@@ -1108,9 +1239,10 @@ function App() {
     </div>
     ${route === 'library' && html`
       <${Library} papers=${papers} loading=${loading}
-        onOpen=${openPaper} onRefresh=${() => refresh()} />`}
+        onOpen=${openPaper} onRefresh=${() => refresh()} onDelete=${removePaper} />`}
     ${route === 'reader' && current && html`
-      <${Reader} paper=${current} onPatch=${applyPatch} showToast=${showToast} />`}
+      <${Reader} paper=${current} onPatch=${applyPatch} showToast=${showToast}
+        allTags=${allTags} extraOptions=${extraOptions} />`}
     ${route === 'add' && html`
       <${AddView} key=${prefill ? 'prefilled' : 'blank'} prefill=${prefill}
         showToast=${showToast}
