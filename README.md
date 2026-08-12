@@ -146,11 +146,22 @@ The `app/` folder is plain static files — host it anywhere with HTTPS (require
 for service workers and the share target). Easiest, staying inside Cloudflare:
 
 ```bash
-npx wrangler pages deploy app --project-name paper-deck
+npx wrangler pages deploy app --project-name paper-deck --branch production
 ```
 
 This gives you `https://paper-deck.pages.dev`. (GitHub Pages, Netlify, etc.
 work just as well.)
+
+**`--branch production` is required**, not optional — Cloudflare Pages treats
+only the project's designated production branch as "live" at the bare
+`pages.dev` domain; any other branch name (including a git branch literally
+called `main`) deploys to a separate preview URL instead
+(`https://<hash>.paper-deck.pages.dev`) that the app never uses. Forgetting
+this flag is the single most common cause of "I changed the code but the app
+still looks old" — the Worker and the app are two separate deploys, and this
+one silently lands on the wrong environment without it. Re-run this command
+every time `app/` changes; it's a separate step from `npx wrangler deploy`
+in `worker/`, which only updates the backend.
 
 ### 7. Connect the app
 
@@ -207,6 +218,17 @@ never open the app.
 
 - **"Notion 404" from the Worker** — you forgot to connect the integration to
   the database (step 2.3), or the `DATABASE_ID` is wrong.
+- **New app features not showing up after a deploy** — two separate causes,
+  check both: (1) you deployed the Worker (`worker/`) but not the app
+  (`app/`), or vice versa — they're independent deploys, see step 5 and 6;
+  (2) you deployed the app to a Pages *preview* URL instead of production
+  because `--branch production` was left off (see step 6) — check
+  `npx wrangler pages deployment list --project-name paper-deck` and confirm
+  the latest deployment says `Production`, not `Preview`. Once production is
+  right, the service worker still caches the app shell (stale-while-revalidate)
+  — the very next load may serve the cached version while it fetches the new
+  one in the background, so a **second** reload (or close/reopen the
+  installed PWA) picks it up.
 - **Bookmarklet says "Save failed (network)"** — this means the request never
   left the page. The usual cause: you're on a browser's *built-in PDF viewer*
   (e.g. Firefox opens `arxiv.org/pdf/...` links in an internal `resource://pdf.js`
