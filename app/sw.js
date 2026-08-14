@@ -11,9 +11,9 @@
 // if only the shell files change and this string doesn't, returning users can
 // keep getting a stale cached app.js indefinitely via stale-while-revalidate,
 // since nothing ever forces the old cache to be dropped.
-const SHELL_CACHE = 'pd-shell-v3';
-const RUNTIME_CACHE = 'pd-runtime-v3';
-const PDF_CACHE = 'pd-pdfs-v3';
+const SHELL_CACHE = 'pd-shell-v4';
+const RUNTIME_CACHE = 'pd-runtime-v4';
+const PDF_CACHE = 'pd-pdfs-v4';
 const SHARE_CACHE = 'pd-shared';
 
 const SHELL = [

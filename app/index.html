@@ -32,10 +32,25 @@
 
   <script type="module" src="./app.js"></script>
   <script>
+    // Auto-reload once a new service worker takes control, so a deployed
+    // update reaches an already-open tab without the user needing to know
+    // to hard-refresh — sw.js only gets byte-checked by the browser on
+    // navigation/focus, and even then the old code keeps running in memory
+    // until something reloads the page.
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () =>
-        navigator.serviceWorker.register('./sw.js').catch(() => {})
-      );
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').then((reg) => {
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') reg.update().catch(() => {});
+          });
+        }).catch(() => {});
+      });
+      let refreshed = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (refreshed) return;
+        refreshed = true;
+        location.reload();
+      });
     }
   </script>
 </body>
