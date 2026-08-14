@@ -166,6 +166,10 @@ button { cursor: pointer; }
   overscroll-behavior: contain; padding: 16px;
   display: flex; flex-direction: column; gap: 12px;
 }
+/* .section has overflow:hidden, which per the flexbox spec makes its
+   automatic min-height resolve to 0 — without this, flex-shrink squashes
+   sections down to a sliver instead of letting the panel scroll. */
+.notes-pane > * { flex-shrink: 0; }
 .notes-pane h2 { margin: 2px 0 4px; font-size: 17px; line-height: 1.35; }
 .notes-pane .paper-meta { color: var(--text-soft); font-size: 13px; margin-bottom: 4px; }
 .section { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
