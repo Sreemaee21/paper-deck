@@ -6,9 +6,14 @@
  * - Never caches Worker API calls (they must stay fresh).
  */
 
-const SHELL_CACHE = 'pd-shell-v1';
-const RUNTIME_CACHE = 'pd-runtime-v1';
-const PDF_CACHE = 'pd-pdfs-v1';
+// Bump these suffixes on every app.js/styles.css/index.html change. Browsers
+// only re-check this file for a service-worker update by byte-comparing it —
+// if only the shell files change and this string doesn't, returning users can
+// keep getting a stale cached app.js indefinitely via stale-while-revalidate,
+// since nothing ever forces the old cache to be dropped.
+const SHELL_CACHE = 'pd-shell-v2';
+const RUNTIME_CACHE = 'pd-runtime-v2';
+const PDF_CACHE = 'pd-pdfs-v2';
 const SHARE_CACHE = 'pd-shared';
 
 const SHELL = [
